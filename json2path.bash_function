@@ -1,0 +1,101 @@
+#! /bin/bash
+
+function json2path ()
+{
+
+	declare __bash_function_init_{opts,{locv,glbv}_{strings,arrays}}=
+	__bash_function_init_opts=()
+	__bash_function_init_locv_strings=(
+		JSON
+		OUT{,_{CUR,VAL}}
+	)
+	__bash_function_init_locv_arrays=(
+		RGXS
+	)
+	__bash_function_init_glbv_strings=()
+	__bash_function_init_glbv_arrays=()
+	: BASH_FUNCTION_INIT SOURCE; eval "$( bash_function_init || echo return 1 )"
+
+	RGXS=(
+		PAR="\"([^\"]*)\"[[:space:]]*:"
+		NXT="(,)"
+		WORD="(true|false|null)"
+		NUMBER="([0-9\.\-\+eE]+)"
+		STRING_EDQ="\"+([^\"]*[\\][\"][^\"]*)\""
+		STRING="\"([^\"]*)\""
+		OBJ_NUL="({})"
+		OBJ_BEG="({)"
+		OBJ_END="(})"
+		ARY_NUL="(\[\])"
+		ARY_BEG="(\[)"
+		ARY_END="(\])"
+	)
+
+	[ -t 0 ] \
+		&& JSON="${1:-}" \
+		|| JSON="$( cat - )"
+
+	while [ -n "${JSON}" ]
+	do
+		OUT_VAL=
+		for ENT in "${RGXS[@]}"
+		do
+			RGX="^[[:space:]]*${ENT#*=}[[:space:]]*(.*)"
+			RGX_TYP="${ENT%%=*}"
+			[[ "${JSON}" =~ ${RGX} ]] || continue
+			JSON="${BASH_REMATCH[2]}"
+			[ "${DBG}" -lt 1 ] || \
+			printf "%12s  " "${RGX_TYP}"
+			case "${RGX_TYP}" in
+				( PAR ) {
+					OUT_CUR="${OUT_CUR}${BASH_REMATCH[1]}"
+				};;
+				( NXT ) {
+					[[ "${OUT_CUR}" =~ ^(.*)\[([0-9]*)\]$ ]] \
+					&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
+					|| OUT_CUR="${OUT_CUR%/*}/"
+				};;
+				( WORD | NUMBER ) {
+					OUT_CUR="${OUT_CUR}="
+					OUT_VAL="${BASH_REMATCH[1]}"
+				};;
+				( STRING* ) {
+					OUT_CUR="${OUT_CUR}="
+					OUT_VAL="\"${BASH_REMATCH[1]}\""
+				};;
+				( OBJ_NUL ) {
+					:
+				};;
+				( OBJ_BEG ) {
+					OUT_CUR="${OUT_CUR}/"
+				};;
+				( OBJ_END ) {
+					OUT_CUR="${OUT_CUR%/*}"
+				};;
+				( ARY_NUL ) {
+					OUT_CUR="${OUT_CUR}[-1]="
+				};;
+				( ARY_BEG ) {
+					OUT_CUR="${OUT_CUR}[0]"
+				};;
+				( ARY_END ) {
+					OUT_CUR="${OUT_CUR%\[*\]}"
+				};;
+				( * ) {
+					echo RGX_ERROR
+					for (( I=0; I<${#BASH_REMATCH[@]}; I++ ))
+					do
+						printf ": BASH_REMATCH[${I}]=%q\n" "${BASH_REMATCH[${I}]}" | cut -b1-${COLUMNS}
+					done
+					return 1
+				};;
+			esac
+			break
+		done
+		[[ "${OUT_CUR}" == *= || "${DBG}" -ge 2 ]] \
+		&& printf "%s\n" "${OUT_CUR%=}${OUT_VAL:+=${OUT_VAL}}" \
+		|| [ "${DBG}" -lt 1 ] || printf "\n"
+	done
+}
+
+: BASH_FUNCTION_INIT RUN; I="${BASH_SOURCE[0]##*/}"; [ "${I}" != "${0}" -a "${#BASH_SOURCE[@]}" -ne 0 ] || ${I%.*} ${@:+"${@}"}
