@@ -10,6 +10,7 @@ function json2path ()
 		OUT{,_{CUR,VAL}}
 	)
 	__bash_function_init_locv_arrays=(
+		JSONS
 		RGXS
 	)
 	__bash_function_init_glbv_strings=()
@@ -20,7 +21,7 @@ function json2path ()
 		PAR="\"([^\"]*)\"[[:space:]]*:"
 		NXT="(,)"
 		WORD="(true|false|null)"
-		NUMBER="([0-9\.\-\+eE]+)"
+		NUMBER="([0-9\.eE\+-]+)"
 		STRING_EDQ="\"+([^\"]*[\\][\"][^\"]*)\""
 		STRING="\"([^\"]*)\""
 		OBJ_NUL="({})"
@@ -29,23 +30,77 @@ function json2path ()
 		ARY_NUL="(\[\])"
 		ARY_BEG="(\[)"
 		ARY_END="(\])"
+		ERR="(.*)"
 	)
 
-	[ -t 0 ] \
-		&& JSON="${1:-}" \
-		|| JSON="$( cat - )"
+	[ "${#ARGS[@]}" -gt 0 ] \
+	&& JSONS=( "${ARGS[@]}" ) \
+	|| [ -t 0 ] \
+	|| JSONS[0]="-"
 
+	for (( I=0; I<${#JSONS[@]}; I++ ))
+	do
+
+	[[ "${JSONS[${I}]}" =~ (${RGXS[0]}|^(${RGXS[7]}|${RGXS[10]})) ]] \
+	&& CMD=( echo "${JSONS[${I}]}" ) \
+	|| [ "${JSONS[${I}]}" == "-" ] \
+	&& CMD=( cat - ) \
+	|| [ -r "${JSONS[${I}]}" ] \
+	&& CMD=( cat "${JSONS[${I}]}" ) \
+	|| { printf "${FNC}: %s\n" "Could not read ( ${JSONS[${I}]} )"; return 1; } 1>&2
+
+	MTH=1
+
+	case "${MTH}" in
+	( 2 ) {
+
+	eval "${CMD[@]}" |
+	while read -r JSON
+	do
 	while [ -n "${JSON}" ]
 	do
+		ENT="${JSON:0:1}"
+		JSON="${JSON:1}"
+		TMP="${TMP}${ENT}"
+	done
+	echo "${TMP}"
+	done
+
+	};;
+	( 1 ) {
+
+	eval "${CMD[@]}" |
+	tr "\t" "\0" |
+	sed "s/\"[^\"]*\":/${TAB}&/g" |
+	tr "\t" "\n" |
+	tr "\0" "\t" |
+	while read -r JSON
+	do
+	while [ -n "${JSON}" ]
+	do
+		OUT_CUR="${OUT_CUR%=}"
 		OUT_VAL=
+		[ "${DBG}" -lt 4 ] \
+		|| {
+			echo
+			printf "%sJSON %s\n" "#" "${#JSON}"
+			printf "%sJSON=%q\n" "$" "${JSON}" | cut -b1-${COLUMNS}
+		} 1>&2
 		for ENT in "${RGXS[@]}"
 		do
 			RGX="^[[:space:]]*${ENT#*=}[[:space:]]*(.*)"
 			RGX_TYP="${ENT%%=*}"
 			[[ "${JSON}" =~ ${RGX} ]] || continue
+			[ "${DBG}" -lt 3 ] \
+			|| {
+				echo
+				for (( I=0; I<${#BASH_REMATCH[@]}; I++ ))
+				do
+					printf "%sBASH_REMATCH[%s] %s\n" "#" "${I}" "${#BASH_REMATCH[${I}]}"
+					printf "%sBASH_REMATCH[%s]=%q\n" "$" "${I}" "${BASH_REMATCH[${I}]}" | cut -b1-${COLUMNS}
+				done
+			} 1>&2
 			JSON="${BASH_REMATCH[2]}"
-			[ "${DBG}" -lt 1 ] || \
-			printf "%12s  " "${RGX_TYP}"
 			case "${RGX_TYP}" in
 				( PAR ) {
 					OUT_CUR="${OUT_CUR}${BASH_REMATCH[1]}"
@@ -81,21 +136,34 @@ function json2path ()
 				( ARY_END ) {
 					OUT_CUR="${OUT_CUR%\[*\]}"
 				};;
+				( ERR ) {
+					echo BAD_JSON
+					return 2
+				};;
 				( * ) {
 					echo RGX_ERROR
-					for (( I=0; I<${#BASH_REMATCH[@]}; I++ ))
-					do
-						printf ": BASH_REMATCH[${I}]=%q\n" "${BASH_REMATCH[${I}]}" | cut -b1-${COLUMNS}
-					done
 					return 1
 				};;
 			esac
 			break
 		done
-		[[ "${OUT_CUR}" == *= || "${DBG}" -ge 2 ]] \
-		&& printf "%s\n" "${OUT_CUR%=}${OUT_VAL:+=${OUT_VAL}}" \
-		|| [ "${DBG}" -lt 1 ] || printf "\n"
+		[ "${DBG}" -lt 4 ] \
+		|| {
+			echo
+			declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/" | cut -b1-${COLUMNS}
+		} 1>&2
+		[ "${DBG}" -lt 3 ] || printf "\n" 1>&2
+		[ "${DBG}" -lt 1 ] || printf "%12s\n" "${RGX_TYP}" 1>&2
+		[[ "${OUT_CUR}" != *= ]] || printf "%s\n" "${OUT_CUR%=}${OUT_VAL:+=${OUT_VAL}}"
+		[ "${DBG}" -lt 2 ] || printf "%s\n" "${OUT_CUR%=}${OUT_VAL:+=${OUT_VAL}}" 1>&2
 	done
+	done
+
+	};;
+	esac
+
+	done
+
 }
 
 : BASH_FUNCTION_INIT RUN; I="${BASH_SOURCE[0]##*/}"; [ "${I}" != "${0}" -a "${#BASH_SOURCE[@]}" -ne 0 ] || ${I%.*} ${@:+"${@}"}
