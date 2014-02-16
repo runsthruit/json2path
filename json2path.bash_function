@@ -4,10 +4,16 @@ function json2path ()
 {
 
 	declare __bash_function_init_{opts,{locv,glbv}_{strings,arrays}}=
-	__bash_function_init_opts=()
+	__bash_function_init_opts=(
+		method
+	)
 	__bash_function_init_locv_strings=(
 		JSON
 		OUT{,_{CUR,VAL}}
+		STG{,BAK}
+		ENT{,BAK}
+		CHR_{DBQ,ESC}
+
 	)
 	__bash_function_init_locv_arrays=(
 		JSONS
@@ -32,6 +38,10 @@ function json2path ()
 		ARY_END="(\])"
 		ERR="(.*)"
 	)
+	LVL=0
+	STG=NOP
+	CHR_DBQ="\""
+	CHR_ESC="\\"
 
 	[ "${#ARGS[@]}" -gt 0 ] \
 	&& JSONS=( "${ARGS[@]}" ) \
@@ -49,31 +59,118 @@ function json2path ()
 	&& CMD=( cat "${JSONS[${I}]}" ) \
 	|| { printf "${FNC}: %s\n" "Could not read ( ${JSONS[${I}]} )"; return 1; } 1>&2
 
-	MTH=1
-
-	case "${MTH}" in
-	( 2 ) {
+	case "${OPT_method}" in
+	( 9 ) {
 
 	eval "${CMD[@]}" |
-	while read -r JSON
+	while IFS="${TAB}${NLN}${CRT}" read -r -n1 ENT
 	do
-	while [ -n "${JSON}" ]
-	do
-		ENT="${JSON:0:1}"
-		JSON="${JSON:1}"
-		TMP="${TMP}${ENT}"
-	done
-	echo "${TMP}"
+		#
+		[ -n "${ENT}" ] || continue
+		#
+		[[ "${STG}" == NOP* ]] || STGBAK="${STG}"
+		case "${STG}" in
+		( STR* ) :;;
+		( * ) {
+			case "${ENT}" in
+			( "${CHR_DBQ}" )	STG=STR;;
+			( " " )			STG=NOP_SPC;;
+			( ":" )			STG=PAR;;
+			( "," )			STG=NXT;;
+			( [0-9\.eE\+-] )	STG=VAL_NUM;;
+			( [TtFf] )		STG=VAL_FLG;;
+			( [Nn] )		STG=VAL_NUL;;
+			( [RUErueFALSfals] )	[[ "${STGBAK}" == VAL_* ]] || STG=ERR;;
+			( "[" )			STG=ARY_BEG;;
+			( "]" )			STG=ARY_END;;
+			( "{" )			STG=OBJ_BEG;;
+			( "}" )			STG=OBJ_END;;
+			( * )			STG=ERR;;
+			esac
+		};;
+		esac
+		case "${STG}" in
+		( STR* ) {
+			#[[ "${STGBAK}" == STR* ]] || OUT_VAL=
+			OUT_VAL="${OUT_VAL}${ENT}"
+			case "${STG}" in
+			( STR_REG ) {
+				case "${ENT}" in
+				( "${CHR_DBQ}" )	STG=NOP;;
+				( "${CHR_ESC}" )	STG=STR_ESC;;
+				esac
+			};;
+			( STR* )			STG=STR_REG;;
+			esac
+		};;
+		( PAR ) {
+			OUT_VAL="${OUT_VAL#\"}"
+			OUT_VAL="${OUT_VAL%\"}"
+			OUT_CUR="${OUT_CUR}${OUT_VAL}"
+			OUT_VAL=
+		};;
+		( VAL* ) {
+			#[[ "${STGBAK}" == VAL* ]] || OUT_VAL=
+			OUT_VAL="${OUT_VAL}${ENT}"
+		};;
+		( OBJ_BEG ) {
+			OUT_CUR="${OUT_CUR}/"
+		};;
+		( ARY_BEG ) {
+			OUT_CUR="${OUT_CUR}[0]"
+		};;
+		( NXT | *_END ) {
+			[[ "${STGBAK}" == STR* || "${STGBAK}" == VAL* || "${OUT_CUR}" == *= ]] \
+			&& {
+				printf "%s%s\n" "${OUT_CUR}" "${OUT_VAL:+=${OUT_VAL}}"
+				OUT_VAL=
+			}
+			case "${STG}" in
+			( NXT ) {
+				[[ "${OUT_CUR}" =~ (.*)\[([-]?[0-9]*)\]$ ]] \
+				&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
+				|| OUT_CUR="${OUT_CUR%/*}/"
+			};;
+			( OBJ_END ) {
+				OUT_CUR="${OUT_CUR%/*}"
+			};;
+			( ARY_END ) {
+				[ "${STGBAK}" == "ARY_BEG" ] \
+				&& OUT_CUR="${OUT_CUR%\[*\]}[-1]=" \
+				|| OUT_CUR="${OUT_CUR%\[*\]}"
+			};;
+			esac
+		};;
+		esac
+		#
+		#[[ "${STG}" == NOP* || "${STG}" == STR* ]] || \
+		#printf "# %10s  %4q  %-60s  %q\n" "${STG}" "${ENT}" "${OUT_CUR}" "${OUT_VAL}"
+		#
+		[ -z "${ENT}" ] || ENTBAK="${ENT}"
+		#sleep 0.1 || break
 	done
 
 	};;
-	( 1 ) {
+	( * ) {
 
 	eval "${CMD[@]}" |
-	tr "\t" "\0" |
-	sed "s/\"[^\"]*\":/${TAB}&/g" |
-	tr "\t" "\n" |
-	tr "\0" "\t" |
+	{
+		case "${OPT_method}" in
+		( 1 ) {
+			sed "s/\"[^\"]*\":/${TAB}&/g" |
+			tr "\t" "\n"
+		};;
+		( 0 ) {
+			tr "\t" "\0" |
+			sed "s/\"[^\"]*\":/${TAB}&/g" |
+			tr "\t" "\n" |
+			tr "\0" "\t"
+		};;
+		( * ) {
+			cat -
+		};;
+		esac
+	} |
 	while read -r JSON
 	do
 	while [ -n "${JSON}" ]
