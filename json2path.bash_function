@@ -4,14 +4,12 @@ function json2path ()
 {
 
 	declare __bash_function_init_{opts,{locv,glbv}_{strings,arrays}}=
-	__bash_function_init_opts=(
-		method
-	)
+	__bash_function_init_opts=()
 	__bash_function_init_locv_strings=(
 		JSON
 		OUT{,_{CUR,VAL}}
 		STG{,BAK}
-		ENT{,BAK}
+		ENT
 		CHR_{DBQ,ESC}
 
 	)
@@ -24,12 +22,11 @@ function json2path ()
 	: BASH_FUNCTION_INIT SOURCE; eval "$( bash_function_init || echo return 1 )"
 
 	RGXS=(
-		PAR="\"([^\"]*)\"[[:space:]]*:"
+		PAR="(:)"
 		NXT="(,)"
 		WORD="(true|false|null)"
 		NUMBER="([0-9\.eE\+-]+)"
-		STRING_EDQ="\"+([^\"]*[\\][\"][^\"]*)\""
-		STRING="\"([^\"]*)\""
+#		STRING_EDQ="\"+([^\"]*[\\][\"][^\"]*)\""
 		OBJ_NUL="({})"
 		OBJ_BEG="({)"
 		OBJ_END="(})"
@@ -38,8 +35,6 @@ function json2path ()
 		ARY_END="(\])"
 		ERR="(.*)"
 	)
-	LVL=0
-	STG=NOP
 	CHR_DBQ="\""
 	CHR_ESC="\\"
 
@@ -51,216 +46,165 @@ function json2path ()
 	for (( I=0; I<${#JSONS[@]}; I++ ))
 	do
 
-	[[ "${JSONS[${I}]}" =~ (${RGXS[0]}|^(${RGXS[7]}|${RGXS[10]})) ]] \
-	&& CMD=( echo "${JSONS[${I}]}" ) \
-	|| [ "${JSONS[${I}]}" == "-" ] \
-	&& CMD=( cat - ) \
-	|| [ -r "${JSONS[${I}]}" ] \
-	&& CMD=( cat "${JSONS[${I}]}" ) \
-	|| { printf "${FNC}: %s\n" "Could not read ( ${JSONS[${I}]} )"; return 1; } 1>&2
+		STG=REG
 
-	TMP="$( 
+		[[ "${JSONS[${I}]}" =~ (${RGXS[0]}|^(${RGXS[7]}|${RGXS[10]})) ]] \
+		&& CMD=( echo "${JSONS[${I}]}" ) \
+		|| [ "${JSONS[${I}]}" == "-" ] \
+		&& CMD=( cat - ) \
+		|| [ -r "${JSONS[${I}]}" ] \
+		&& CMD=( cat "${JSONS[${I}]}" ) \
+		|| { printf "${FNC}: %s\n" "Could not read ( ${JSONS[${I}]} )"; return 1; } 1>&2
 
-	case "${OPT_method}" in
-	( 9 ) {
+		OUT="$( 
 
-	eval "${CMD[@]}" |
-	while IFS="${TAB}${NLN}${CRT}" read -r -n1 ENT
-	do
-		#
-		[ -n "${ENT}" ] || continue
-		#
-		[[ "${STG}" == NOP* ]] || STGBAK="${STG}"
-		#
-		case "${STG}" in
-		( STR_REG ) {
-			case "${ENT}" in
-			( "${CHR_DBQ}" )	STG=NOP;;
-			( "${CHR_ESC}" )	STG=STR_ESC;;
-			esac
-			OUT_VAL="${OUT_VAL}${ENT}"
-		};;
-		( STR* ) {
-			STG=STR_REG
-			OUT_VAL="${OUT_VAL}${ENT}"
-		};;
-		( * ) {
-			case "${ENT}" in
-			( "${CHR_DBQ}" )	STG=STR;;
-			( " " )			STG=NOP_SPC;;
-			( ":" ) {
-				STG=PAR
-				OUT_VAL="${OUT_VAL#\"}"
-				OUT_VAL="${OUT_VAL%\"}"
-				OUT_CUR="${OUT_CUR}${OUT_VAL}"
-				OUT_VAL=
-			};;
-			( [0-9\.eE\+-] ) {
-				STG=VAL_NUM
-				OUT_VAL="${OUT_VAL}${ENT}"
-			};;
-			( [TtFf] ) {
-				STG=VAL_FLG
-				OUT_VAL="${OUT_VAL}${ENT}"
-			};;
-			( [Nn] ) {
-				STG=VAL_NUL
-				OUT_VAL="${OUT_VAL}${ENT}"
-			};;
-			( [RUErueFALSfals] )	[[ "${STGBAK}" == VAL_* ]] || STG=ERR;;
-			( "[" ) {
-				STG=ARY_BEG
-				OUT_CUR="${OUT_CUR}[0]"
-			};;
-			( "{" ) {
-				STG=OBJ_BEG
-				OUT_CUR="${OUT_CUR}/"
-			};;
-			( "," | "]" | "}" ) {
-				case "${ENT}" in
-				( "," )			STG=NXT;;
-				( "]" )			STG=ARY_END;;
-				( "}" )			STG=OBJ_END;;
-				esac
-				[[ "${STGBAK}" != STR* && "${STGBAK}" != VAL* && "${OUT_CUR}" != *= ]] || {
-					printf "%s%s\n" "${OUT_CUR%=}" "${OUT_VAL:+=${OUT_VAL}}"
-					OUT_VAL=
+			eval "${CMD[@]}" |
+			while read -r -d"${CHR_DBQ}" JSON
+			do
+
+				[ "${STG}" != STR ] || {
+
+					[ "${DBG}" -lt 4 ] \
+					|| {
+						printf "\n%0*d\n" ${COLUMNS:-10} 0
+						printf "@ STG %s << %s\n" "${STG}" "${STGBAK}"
+						printf "%sJSON %s\t{%q}\n" "$" "${#JSON}" "${JSON}" | cut -b1-${COLUMNS}
+					} 1>&2
+
+					OUT_VAL="${OUT_VAL}${JSON}"
+					[[ "${JSON}" =~ [${CHR_ESC}]$ ]] && {
+						printf " >> ESC\n" 1>&2
+						OUT_VAL="${OUT_VAL}${CHR_DBQ}"
+						STGBAK="${STG}"
+					} || {
+						STG=REG
+						STGBAK=STR
+					}
+					JSON=
+					continue
+
 				}
-				case "${STG}" in
-				( NXT ) {
-					[[ "${OUT_CUR}" =~ (.*)\[([-]?[0-9]*)\]$ ]] \
-					&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
-					|| OUT_CUR="${OUT_CUR%/*}/"
-				};;
-				( OBJ_END ) {
-					OUT_CUR="${OUT_CUR%/*}"
-				};;
-				( ARY_END ) {
-					[ "${STGBAK}" == "ARY_BEG" ] \
-					&& OUT_CUR="${OUT_CUR%\[*\]}[-1]=" \
-					|| OUT_CUR="${OUT_CUR%\[*\]}"
-				};;
-				esac
-			};;
-			( * )			STG=ERR;;
-			esac
-		};;
-		esac
-		[ -z "${ENT}" ] || ENTBAK="${ENT}"
-	done
 
-	};;
-	( * ) {
-
-	eval "${CMD[@]}" |
-	{
-		case "${OPT_method}" in
-		( 1 ) {
-			sed "s/\"[^\"]*\":/${TAB}&/g" |
-			tr "\t" "\n"
-		};;
-		( 0 ) {
-			tr "\t" "\0" |
-			sed "s/\"[^\"]*\":/${TAB}&/g" |
-			tr "\t" "\n" |
-			tr "\0" "\t"
-		};;
-		( * ) {
-			cat -
-		};;
-		esac
-	} |
-	while read -r JSON
-	do
-	while [ -n "${JSON}" ]
-	do
-		OUT_CUR="${OUT_CUR%=}"
-		OUT_VAL=
-		[ "${DBG}" -lt 4 ] \
-		|| {
-			echo
-			printf "%sJSON %s\n" "#" "${#JSON}"
-			printf "%sJSON=%q\n" "$" "${JSON}" | cut -b1-${COLUMNS}
-		} 1>&2
-		for ENT in "${RGXS[@]}"
-		do
-			RGX="^[[:space:]]*${ENT#*=}[[:space:]]*(.*)"
-			RGX_TYP="${ENT%%=*}"
-			[[ "${JSON}" =~ ${RGX} ]] || continue
-			[ "${DBG}" -lt 3 ] \
-			|| {
-				echo
-				for (( I=0; I<${#BASH_REMATCH[@]}; I++ ))
+				while :
 				do
-					printf "%sBASH_REMATCH[%s] %s\n" "#" "${I}" "${#BASH_REMATCH[${I}]}"
-					printf "%sBASH_REMATCH[%s]=%q\n" "$" "${I}" "${BASH_REMATCH[${I}]}" | cut -b1-${COLUMNS}
+
+					[ "${DBG}" -lt 4 ] \
+					|| {
+						printf "\n%0*d\n" ${COLUMNS:-10} 0
+						printf "@ STG %s << %s\n" "${STG}" "${STGBAK}"
+						printf "%sJSON %s\t{%q}\n" "$" "${#JSON}" "${JSON}" | cut -b1-${COLUMNS}
+					} 1>&2
+
+					for (( ENT=0; ENT<${#RGXS[@]}; ENT++ ))
+					do
+
+						RGX="^[[:space:]]*${RGXS[${ENT}]#*=}[[:space:]]*(.*)"
+						RGX_TYP="${RGXS[${ENT}]%%=*}"
+
+						[[ "${JSON}" =~ ${RGX} ]] || continue
+
+						[ "${RGX_TYP}" == PAR -o "${STGBAK}" != STR ] || {
+							OUT_CUR="${OUT_CUR}="
+							OUT_VAL="\"${OUT_VAL}\""
+							STGBAK="${STG}"
+							break
+						}
+
+						[ "${DBG}" -lt 1 ] || {
+							printf "\n%% RGX %s [%s]\n" "${RGX_TYP}" "${ENT}"
+							[ "${DBG}" -lt 3 ] \
+							|| {
+								for (( I=1; I<${#BASH_REMATCH[@]}; I++ ))
+								do
+									printf "%sBASH_REMATCH[%s] %s\t{%q}\n" \
+										"$" \
+										"${I}" \
+										"${#BASH_REMATCH[${I}]}" \
+										"${BASH_REMATCH[${I}]}" |
+										cut -b1-${COLUMNS}
+								done
+							}
+						} 1>&2
+
+						JSON="${BASH_REMATCH[2]}"
+
+						case "${RGX_TYP}" in
+							( PAR ) {
+								OUT_CUR="${OUT_CUR}${OUT_VAL}"
+								OUT_VAL=
+							};;
+							( NXT ) {
+								[[ "${OUT_CUR}" =~ ^(.*)\[([0-9]*)\]$ ]] \
+								&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
+								|| OUT_CUR="${OUT_CUR%/*}/"
+							};;
+							( WORD | NUMBER ) {
+								OUT_CUR="${OUT_CUR}="
+								OUT_VAL="${BASH_REMATCH[1]}"
+								break
+								ENT="${#RGXS[@]}"
+							};;
+							( OBJ_NUL ) :;;
+							( OBJ_BEG ) OUT_CUR="${OUT_CUR}/";;
+							( OBJ_END ) OUT_CUR="${OUT_CUR%/*}";;
+							( ARY_NUL ) {
+								OUT_CUR="${OUT_CUR}[-1]="
+								break
+								ENT="${#RGXS[@]}"
+							};;
+							( ARY_BEG ) OUT_CUR="${OUT_CUR}[0]";;
+							( ARY_END ) OUT_CUR="${OUT_CUR%\[*\]}";;
+							( ERR ) {
+								printf ": BAD_JSON\n" 1>&2
+								return 2
+							};;
+							( * ) {
+								printf ": RGX_ERROR\n" 1>&2
+								return 1
+							};;
+						esac
+
+						[ "${DBG}" -lt 4 ] \
+						|| {
+							declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/" | cut -b1-${COLUMNS}
+						} 1>&2
+
+						#[ "${ENT}" -ne "${#RGXS[@]}" ] || break
+						[ -n "${JSON}" ] || break
+						ENT=0
+						STGBAK="${STG}"
+
+					done
+
+					[ "${DBG}" -lt 4 ] \
+					|| {
+						declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/" | cut -b1-${COLUMNS}
+					} 1>&2
+
+					[ "${DBG}" -lt 2 ] || {
+						[ "${DBG}" -lt 3 ] || printf "\n"
+						[[ "${OUT_CUR}" == *= ]] \
+						&& printf "%s%s\n" "+ " "${OUT_CUR}${OUT_VAL}" \
+						|| printf "%s%s\n" "- " "${OUT_CUR}${OUT_VAL}"
+					} 1>&2
+
+					[[ "${OUT_CUR}" != *= ]] || {
+						printf "%s\n" "${OUT_CUR}${OUT_VAL}"
+						OUT_CUR="${OUT_CUR%=}"
+						OUT_VAL=
+					}
+
+					[ -n "${JSON}" ] || break
+
 				done
-			} 1>&2
-			JSON="${BASH_REMATCH[2]}"
-			case "${RGX_TYP}" in
-				( PAR ) {
-					OUT_CUR="${OUT_CUR}${BASH_REMATCH[1]}"
-				};;
-				( NXT ) {
-					[[ "${OUT_CUR}" =~ ^(.*)\[([0-9]*)\]$ ]] \
-					&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
-					|| OUT_CUR="${OUT_CUR%/*}/"
-				};;
-				( WORD | NUMBER ) {
-					OUT_CUR="${OUT_CUR}="
-					OUT_VAL="${BASH_REMATCH[1]}"
-				};;
-				( STRING* ) {
-					OUT_CUR="${OUT_CUR}="
-					OUT_VAL="\"${BASH_REMATCH[1]}\""
-				};;
-				( OBJ_NUL ) {
-					:
-				};;
-				( OBJ_BEG ) {
-					OUT_CUR="${OUT_CUR}/"
-				};;
-				( OBJ_END ) {
-					OUT_CUR="${OUT_CUR%/*}"
-				};;
-				( ARY_NUL ) {
-					OUT_CUR="${OUT_CUR}[-1]="
-				};;
-				( ARY_BEG ) {
-					OUT_CUR="${OUT_CUR}[0]"
-				};;
-				( ARY_END ) {
-					OUT_CUR="${OUT_CUR%\[*\]}"
-				};;
-				( ERR ) {
-					echo BAD_JSON
-					return 2
-				};;
-				( * ) {
-					echo RGX_ERROR
-					return 1
-				};;
-			esac
-			break
-		done
-		[ "${DBG}" -lt 4 ] \
-		|| {
-			echo
-			declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/" | cut -b1-${COLUMNS}
-		} 1>&2
-		[ "${DBG}" -lt 3 ] || printf "\n" 1>&2
-		[ "${DBG}" -lt 1 ] || printf "%12s\n" "${RGX_TYP}" 1>&2
-		[[ "${OUT_CUR}" != *= ]] || printf "%s\n" "${OUT_CUR%=}${OUT_VAL:+=${OUT_VAL}}"
-		[ "${DBG}" -lt 2 ] || printf "%s\n" "${OUT_CUR%=}${OUT_VAL:+=${OUT_VAL}}" 1>&2
-	done
-	done
 
-	};;
-	esac
+				STG=STR
 
-	)"
+			done
 
-	echo "${TMP}"
+		)"
+
+		echo "${OUT}"
 
 	done
 
