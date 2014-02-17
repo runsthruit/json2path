@@ -73,7 +73,6 @@ function json2path ()
 
 					OUT_VAL="${OUT_VAL}${JSON}"
 					[[ "${JSON}" =~ [${CHR_ESC}]$ ]] && {
-						printf " >> ESC\n" 1>&2
 						OUT_VAL="${OUT_VAL}${CHR_DBQ}"
 						STGBAK="${STG}"
 					} || {
