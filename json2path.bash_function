@@ -59,6 +59,8 @@ function json2path ()
 	&& CMD=( cat "${JSONS[${I}]}" ) \
 	|| { printf "${FNC}: %s\n" "Could not read ( ${JSONS[${I}]} )"; return 1; } 1>&2
 
+	TMP="$( 
+
 	case "${OPT_method}" in
 	( 9 ) {
 
@@ -69,85 +71,82 @@ function json2path ()
 		[ -n "${ENT}" ] || continue
 		#
 		[[ "${STG}" == NOP* ]] || STGBAK="${STG}"
+		#
 		case "${STG}" in
-		( STR* ) :;;
+		( STR_REG ) {
+			case "${ENT}" in
+			( "${CHR_DBQ}" )	STG=NOP;;
+			( "${CHR_ESC}" )	STG=STR_ESC;;
+			esac
+			OUT_VAL="${OUT_VAL}${ENT}"
+		};;
+		( STR* ) {
+			STG=STR_REG
+			OUT_VAL="${OUT_VAL}${ENT}"
+		};;
 		( * ) {
 			case "${ENT}" in
 			( "${CHR_DBQ}" )	STG=STR;;
 			( " " )			STG=NOP_SPC;;
-			( ":" )			STG=PAR;;
-			( "," )			STG=NXT;;
-			( [0-9\.eE\+-] )	STG=VAL_NUM;;
-			( [TtFf] )		STG=VAL_FLG;;
-			( [Nn] )		STG=VAL_NUL;;
+			( ":" ) {
+				STG=PAR
+				OUT_VAL="${OUT_VAL#\"}"
+				OUT_VAL="${OUT_VAL%\"}"
+				OUT_CUR="${OUT_CUR}${OUT_VAL}"
+				OUT_VAL=
+			};;
+			( [0-9\.eE\+-] ) {
+				STG=VAL_NUM
+				OUT_VAL="${OUT_VAL}${ENT}"
+			};;
+			( [TtFf] ) {
+				STG=VAL_FLG
+				OUT_VAL="${OUT_VAL}${ENT}"
+			};;
+			( [Nn] ) {
+				STG=VAL_NUL
+				OUT_VAL="${OUT_VAL}${ENT}"
+			};;
 			( [RUErueFALSfals] )	[[ "${STGBAK}" == VAL_* ]] || STG=ERR;;
-			( "[" )			STG=ARY_BEG;;
-			( "]" )			STG=ARY_END;;
-			( "{" )			STG=OBJ_BEG;;
-			( "}" )			STG=OBJ_END;;
+			( "[" ) {
+				STG=ARY_BEG
+				OUT_CUR="${OUT_CUR}[0]"
+			};;
+			( "{" ) {
+				STG=OBJ_BEG
+				OUT_CUR="${OUT_CUR}/"
+			};;
+			( "," | "]" | "}" ) {
+				case "${ENT}" in
+				( "," )			STG=NXT;;
+				( "]" )			STG=ARY_END;;
+				( "}" )			STG=OBJ_END;;
+				esac
+				[[ "${STGBAK}" != STR* && "${STGBAK}" != VAL* && "${OUT_CUR}" != *= ]] || {
+					printf "%s%s\n" "${OUT_CUR%=}" "${OUT_VAL:+=${OUT_VAL}}"
+					OUT_VAL=
+				}
+				case "${STG}" in
+				( NXT ) {
+					[[ "${OUT_CUR}" =~ (.*)\[([-]?[0-9]*)\]$ ]] \
+					&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
+					|| OUT_CUR="${OUT_CUR%/*}/"
+				};;
+				( OBJ_END ) {
+					OUT_CUR="${OUT_CUR%/*}"
+				};;
+				( ARY_END ) {
+					[ "${STGBAK}" == "ARY_BEG" ] \
+					&& OUT_CUR="${OUT_CUR%\[*\]}[-1]=" \
+					|| OUT_CUR="${OUT_CUR%\[*\]}"
+				};;
+				esac
+			};;
 			( * )			STG=ERR;;
 			esac
 		};;
 		esac
-		case "${STG}" in
-		( STR* ) {
-			#[[ "${STGBAK}" == STR* ]] || OUT_VAL=
-			OUT_VAL="${OUT_VAL}${ENT}"
-			case "${STG}" in
-			( STR_REG ) {
-				case "${ENT}" in
-				( "${CHR_DBQ}" )	STG=NOP;;
-				( "${CHR_ESC}" )	STG=STR_ESC;;
-				esac
-			};;
-			( STR* )			STG=STR_REG;;
-			esac
-		};;
-		( PAR ) {
-			OUT_VAL="${OUT_VAL#\"}"
-			OUT_VAL="${OUT_VAL%\"}"
-			OUT_CUR="${OUT_CUR}${OUT_VAL}"
-			OUT_VAL=
-		};;
-		( VAL* ) {
-			#[[ "${STGBAK}" == VAL* ]] || OUT_VAL=
-			OUT_VAL="${OUT_VAL}${ENT}"
-		};;
-		( OBJ_BEG ) {
-			OUT_CUR="${OUT_CUR}/"
-		};;
-		( ARY_BEG ) {
-			OUT_CUR="${OUT_CUR}[0]"
-		};;
-		( NXT | *_END ) {
-			[[ "${STGBAK}" == STR* || "${STGBAK}" == VAL* || "${OUT_CUR}" == *= ]] \
-			&& {
-				printf "%s%s\n" "${OUT_CUR}" "${OUT_VAL:+=${OUT_VAL}}"
-				OUT_VAL=
-			}
-			case "${STG}" in
-			( NXT ) {
-				[[ "${OUT_CUR}" =~ (.*)\[([-]?[0-9]*)\]$ ]] \
-				&& OUT_CUR="${BASH_REMATCH[1]}[$((${BASH_REMATCH[2]}+1))]" \
-				|| OUT_CUR="${OUT_CUR%/*}/"
-			};;
-			( OBJ_END ) {
-				OUT_CUR="${OUT_CUR%/*}"
-			};;
-			( ARY_END ) {
-				[ "${STGBAK}" == "ARY_BEG" ] \
-				&& OUT_CUR="${OUT_CUR%\[*\]}[-1]=" \
-				|| OUT_CUR="${OUT_CUR%\[*\]}"
-			};;
-			esac
-		};;
-		esac
-		#
-		#[[ "${STG}" == NOP* || "${STG}" == STR* ]] || \
-		#printf "# %10s  %4q  %-60s  %q\n" "${STG}" "${ENT}" "${OUT_CUR}" "${OUT_VAL}"
-		#
 		[ -z "${ENT}" ] || ENTBAK="${ENT}"
-		#sleep 0.1 || break
 	done
 
 	};;
@@ -258,6 +257,10 @@ function json2path ()
 
 	};;
 	esac
+
+	)"
+
+	echo "${TMP}"
 
 	done
 
