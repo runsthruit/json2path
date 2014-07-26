@@ -26,7 +26,6 @@ function json2path ()
 		NXT="(,)"
 		WORD="(true|false|null)"
 		NUMBER="([0-9\.eE\+-]+)"
-#		STRING_EDQ="\"+([^\"]*[\\][\"][^\"]*)\""
 		OBJ_NUL="({})"
 		OBJ_BEG="({)"
 		OBJ_END="(})"
@@ -43,12 +42,22 @@ function json2path ()
 	|| [ -t 0 ] \
 	|| JSONS[0]="-"
 
+	[ "${DBG}" -lt 9 ] \
+	|| {
+		printf "%sDBG\t{%q}\n" "#" "${DBG}"
+	} 1>&2
+
 	for (( I=0; I<${#JSONS[@]}; I++ ))
 	do
 
 		STG=REG
 
-		[[ "${JSONS[${I}]}" =~ (${RGXS[0]}|^(${RGXS[7]}|${RGXS[10]})) ]] \
+		[ "${DBG}" -lt 9 ] \
+		|| {
+			printf "%sJSONS[%02d]\t{%q}\n" "*" "${I}" "${JSONS[${I}]}"
+		} 1>&2
+
+		[[ "${JSONS[${I}]}" =~ (${RGXS[0]#*=}|^(${RGXS[6]#*=}|${RGXS[9]#*=})) ]] \
 		&& CMD=( echo "${JSONS[${I}]}" ) \
 		|| [ "${JSONS[${I}]}" == "-" ] \
 		&& CMD=( cat - ) \
@@ -58,18 +67,21 @@ function json2path ()
 
 		OUT="$( 
 
-			eval "${CMD[@]}" |
+			{
+				eval "${CMD[@]}"
+				echo '"'
+			} |
 			while read -r -d"${CHR_DBQ}" JSON
 			do
 
-				[ "${STG}" != STR ] || {
+				[ "${DBG}" -lt 4 ] \
+				|| {
+					printf "\n%0*d\n" ${COLUMNS:-10} 0
+					printf "@ STG %s << %s\n" "${STG}" "${STGBAK}"
+					printf "%sJSON %s\t{%q}\n" "$" "${#JSON}" "${JSON}"
+				} 1>&2
 
-					[ "${DBG}" -lt 4 ] \
-					|| {
-						printf "\n%0*d\n" ${COLUMNS:-10} 0
-						printf "@ STG %s << %s\n" "${STG}" "${STGBAK}"
-						printf "%sJSON %s\t{%q}\n" "$" "${#JSON}" "${JSON}" | cut -b1-${COLUMNS}
-					} 1>&2
+				[ "${STG}" != STR ] || {
 
 					OUT_VAL="${OUT_VAL}${JSON}"
 					[[ "${JSON}" =~ [${CHR_ESC}]$ ]] && {
@@ -86,13 +98,6 @@ function json2path ()
 
 				while :
 				do
-
-					[ "${DBG}" -lt 4 ] \
-					|| {
-						printf "\n%0*d\n" ${COLUMNS:-10} 0
-						printf "@ STG %s << %s\n" "${STG}" "${STGBAK}"
-						printf "%sJSON %s\t{%q}\n" "$" "${#JSON}" "${JSON}" | cut -b1-${COLUMNS}
-					} 1>&2
 
 					for (( ENT=0; ENT<${#RGXS[@]}; ENT++ ))
 					do
@@ -119,8 +124,7 @@ function json2path ()
 										"$" \
 										"${I}" \
 										"${#BASH_REMATCH[${I}]}" \
-										"${BASH_REMATCH[${I}]}" |
-										cut -b1-${COLUMNS}
+										"${BASH_REMATCH[${I}]}"
 								done
 							}
 						} 1>&2
@@ -165,7 +169,7 @@ function json2path ()
 
 						[ "${DBG}" -lt 4 ] \
 						|| {
-							declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/" | cut -b1-${COLUMNS}
+							declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/"
 						} 1>&2
 
 						#[ "${ENT}" -ne "${#RGXS[@]}" ] || break
@@ -177,7 +181,7 @@ function json2path ()
 
 					[ "${DBG}" -lt 4 ] \
 					|| {
-						declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/" | cut -b1-${COLUMNS}
+						declare -p OUT_{CUR,VAL} | sed "s/^declare [^ ]* /\$/"
 					} 1>&2
 
 					[ "${DBG}" -lt 2 ] || {
